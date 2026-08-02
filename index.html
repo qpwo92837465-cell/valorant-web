@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>VALORANT 1FPS EDITION</title>
+    <style>
+        body {
+            margin: 0; background-color: #0f1923; color: white;
+            font-family: 'Arial', sans-serif; overflow: hidden;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh;
+            user-select: none;
+        }
+        /* 발로란트 상단 HUD (라운드/스코어) */
+        #top-hud {
+            position: absolute; top: 10px; width: 900px;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 16px; font-weight: bold; z-index: 5;
+        }
+        .team-score { background: #1f2a36; padding: 5px 15px; border: 1px solid #3d4f5f; border-radius: 4px; }
+        
+        canvas {
+            background-color: #111; border: 2px solid #ff4655;
+            box-shadow: 0 0 20px rgba(255, 70, 85, 0.3); cursor: none;
+        }
+
+        /* 발로란트 하단 HUD (체력, 총기, 크레드) */
+        #bottom-hud {
+            position: absolute; bottom: 15px; width: 900px;
+            display: flex; justify-content: space-between; align-items: flex-end;
+            padding: 0 20px; box-sizing: border-box; z-index: 5; font-weight: bold;
+        }
+        .hud-box { background: rgba(15, 25, 35, 0.85); border: 1px solid #3d4f5f; padding: 8px 15px; border-radius: 4px; font-size: 14px; }
+
+        /* 상점 및 설정 모달 스타일 */
+        .modal {
+            display: none; position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); background: #1f2a36;
+            border: 2px solid #ff4655; padding: 20px; border-radius: 8px;
+            z-index: 10; width: 450px; max-height: 80vh; overflow-y: auto;
+        }
+        .modal h2 { color: #ff4655; margin-top: 0; font-size: 16px; text-align: center; }
+        .shop-category { font-size: 12px; color: #ffcc00; margin: 10px 0 5px 0; border-bottom: 1px solid #3d4f5f; }
+        .shop-item {
+            background: #2b3847; padding: 8px; margin: 4px 0; border-radius: 4px;
+            display: flex; justify-content: space-between; cursor: pointer; font-size: 13px;
+        }
+        .shop-item:hover { background: #ff4655; color: white; }
+        .modal button {
+            background: #ff4655; color: white; border: none; padding: 8px;
+            width: 100%; margin-top: 15px; cursor: pointer; font-weight: bold; border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 상단 HUD -->
+    <div id="top-hud">
+        <div class="team-score" style="color: #00ffcc;">ATTACK (아군) <span id="allyScore">0</span></div>
+        <div style="background:#1f2a36; padding:5px 15px; border-radius:4px; border:1px solid #ff4655;">BUY PHASE (B: 상점)</div>
+        <div class="team-score" style="color: #ff4655;">DEFENSE (적군) <span id="enemyScore">0</span></div>
+    </div>
+
+    <canvas id="gameCanvas" width="900" height="500"></canvas>
+
+    <!-- 하단 HUD -->
+    <div id="bottom-hud">
+        <div class="hud-box">체력: <span style="color:#00ffcc;" id="hp">100</span> / 100</div>
+        <div class="hud-box">크레드: <span style="color:#ffcc00;" id="money">800</span>원</div>
+        <div class="hud-box">장비: <span style="color:#ffcc00;" id="weaponName">클래식</span></div>
+        <div class="hud-box" style="font-size: 18px;"><span id="ammo">12</span> / <span id="maxAmmo" style="font-size:12px;">12</span></div>
+    </div>
+
+    <!-- 상점 모달 -->
+    <div id="shopModal" class="modal">
+        <h2>VALORANT SHOP</h2>
+        <div class="shop-category">보조 무기</div>
+        <div class="shop-item" onclick="buyWeapon('클래식', 0, 12, 15)"><span>클래식</span><span>무료</span></div>
+        <div class="shop-item" onclick="buyWeapon('고스트', 800, 15, 30)"><span>고스트</span><span>800원</span></div>
+        <div class="shop-item" onclick="buyWeapon('셰리프', 800, 6, 90)"><span>셰리프 (원샷 헤드)</span><span>800원</span></div>
+        
+        <div class="shop-category">소총</div>
+        <div class="shop-item" onclick="buyWeapon('불독', 2050, 24, 35)"><span>불독</span><span>2,050원</span></div>
+        <div class="shop-item" onclick="buyWeapon('팬텀', 2900, 30, 40)"><span>팬텀</span><span>2,900원</span></div>
+        <div class="shop-item" onclick="buyWeapon('밴달', 2900, 25, 100)"><span>밴달 (헤드 즉사)</span><span>2,900원</span></div>
+
+        <div class="shop-category">저격총</div>
+        <div class="shop-item" onclick="buyWeapon('오퍼레이터', 4700, 5, 150)"><span>오퍼레이터</span><span>4,700원</span></div>
+        <button onclick="toggleShop()">상점 닫기 (B)</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        let player = {
+            x: 3.5, y: 3.5, angle: 0,
+            hp: 100, money: 800,
+            weapon: '클래식', ammo: 12, maxAmmo: 12, damage: 15,
+            fireRate: 15, fireCooldown: 0
+        };
+
+        let keys = { w: false, a: false, s: false, d: false, left: false, right: false };
+        let shopOpen = false;
+        let mouseLocked = false;
+
+        // 맵 데이터 (1: 벽, 0: 빈공간)
+        const map = [
+            [1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,1,0,0,0,0,1],
+            [1,0,1,0,1,0,1,1,0,1],
+            [1,0,1,0,0,0,0,1,0,1],
+            [1,0,0,0,1,1,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        // 5대5 요원 (아군 4명, 적군 5명)
+        let agents = [
+            { x: 3.0, y: 3.0, team: 'ally', hp: 100, name: '제트' },
+            { x: 2.5, y: 3.5, team: 'ally', hp: 100, name: '레이나' },
+            { x: 3.5, y: 2.5, team: 'ally', hp: 100, name: '오멘' },
+            { x: 2.0, y: 3.0, team: 'ally', hp: 100, name: '세이지' },
+            
+            { x: 7.5, y: 4.5, team: 'enemy', hp: 100, name: '바이퍼' },
+            { x: 8.0, y: 1.5, team: 'enemy', hp: 100, name: '사이퍼' },
+            { x: 6.5, y: 2.5, team: 'enemy', hp: 100, name: '체임버' },
+            { x: 7.0, y: 3.5, team: 'enemy', hp: 100, name: '소바' },
+            { x: 8.5, y: 3.5, team: 'enemy', hp: 100, name: '브림스톤' }
+        ];
+
+        let allyScore = 0, enemyScore = 0;
+
+        window.addEventListener("keydown", (e) => {
+            if (e.key === 'w' || e.key === 'W') keys.w = true;
+            if (e.key === 's' || e.key === 'S') keys.s = true;
+            if (e.key === 'a' || e.key === 'A') keys.a = true;
+            if (e.key === 'd' || e.key === 'D') keys.d = true;
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+            if (e.key === 'b' || e.key === 'B') toggleShop();
+            if (e.key === 'r' || e.key === 'R') player.ammo = player.maxAmmo;
+        });
+
+        window.addEventListener("keyup", (e) => {
+            if (e.key === 'w' || e.key === 'W') keys.w = false;
+            if (e.key === 's' || e.key === 'S') keys.s = false;
+            if (e.key === 'a' || e.key === 'A') keys.a = false;
+            if (e.key === 'd' || e.key === 'D') keys.d = false;
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+        });
+
+        canvas.addEventListener("click", () => {
+            if (shopOpen) return;
+            canvas.requestPointerLock();
+            mouseLocked = true;
+            shoot();
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!mouseLocked || shopOpen) return;
+            player.angle += e.movementX * 0.003;
+        });
+
+        function toggleShop() {
+            shopOpen = !shopOpen;
+            document.getElementById("shopModal").style.display = shopOpen ? "block" : "none";
+            if (shopOpen) document.exitPointerLock();
+        }
+
+        function buyWeapon(name, price, maxAmmo, dmg) {
+            if (player.money >= price) {
+                player.money -= price;
+                player.weapon = name;
+                player.maxAmmo = maxAmmo;
+                player.ammo = maxAmmo;
+                player.damage = dmg;
+                document.getElementById("money").innerText = player.money;
+                document.getElementById("weaponName").innerText = name;
+                document.getElementById("maxAmmo").innerText = maxAmmo;
+                toggleShop();
+            } else {
+                alert("크레드가 부족합니다!");
+            }
+        }
+
+        function shoot() {
+            if (player.ammo <= 0 || player.fireCooldown > 0) return;
+            player.ammo--;
+            player.fireCooldown = 10;
+            document.getElementById("ammo").innerText = player.ammo;
+
+            // 정면에 있는 적 피격 판정
+            for (let agent of agents) {
+                if (agent.team === 'enemy' && agent.hp > 0) {
+                    let dx = agent.x - player.x;
+                    let dy = agent.y - player.y;
+                    let angleToAgent = Math.atan2(dy, dx);
+                    let diff = Math.abs(player.angle - angleToAgent);
+                    if (diff < 0.2) {
+                        agent.hp -= player.damage;
+                        if (agent.hp <= 0) {
+                            player.money += 300;
+                            document.getElementById("money").innerText = player.money;
+                            allyScore++;
+                            document.getElementById("allyScore").innerText = allyScore;
+                        }
+                    }
+                }
+            }
+        }
+
+        function update() {
+            if (shopOpen) return;
+            if (player.fireCooldown > 0) player.fireCooldown--;
+
+            let moveSpeed = 0.03;
+            let rotSpeed = 0.04;
+
+            if (keys.left) player.angle -= rotSpeed;
+            if (keys.right) player.angle += rotSpeed;
+
+            let dx = Math.cos(player.angle) * moveSpeed;
+            let dy = Math.sin(player.angle) * moveSpeed;
+
+            if (keys.w) {
+                if (map[Math.floor(player.y)][Math.floor(player.x + dx)] === 0) player.x += dx;
+                if (map[Math.floor(player.y + dy)][Math.floor(player.x)] === 0) player.y += dy;
+            }
+            if (keys.s) {
+                if (map[Math.floor(player.y)][Math.floor(player.x - dx)] === 0) player.x -= dx;
+                if (map[Math.floor(player.y - dy)][Math.floor(player.x)] === 0) player.y -= dy;
+            }
+
+            // 적 AI 간단 이동 및 공격
+            for (let agent of agents) {
+                if (agent.team === 'enemy' && agent.hp > 0) {
+                    if (Math.hypot(player.x - agent.x, player.y - agent.y) < 4) {
+                        if (Math.random() < 0.02) {
+                            player.hp -= 10;
+                            document.getElementById("hp").innerText = player.hp;
+                            if (player.hp <= 0) {
+                                alert("사망하셨습니다!");
+                                player.hp = 100;
+                                player.x = 3.5; player.y = 3.5;
+                                enemyScore++;
+                                document.getElementById("enemyScore").innerText = enemyScore;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function draw() {
+            ctx.fillStyle = "#1a232a";
+            ctx.fillRect(0, 0, canvas.width, canvas.height / 2); // 하늘
+            ctx.fillStyle = "#2e3b4e";
+            ctx.fillRect(0, canvas.height / 2, canvas.width, canvas.height / 2); // 바닥
+
+            // 1인칭 레이캐스팅 렌더링
+            let fov = Math.PI / 3;
+            let numRays = canvas.width;
+            let halfFov = fov / 2;
+
+            for (let i = 0; i < numRays; i++) {
+                let rayAngle = player.angle - halfFov + (i / numRays) * fov;
+                let distance = 0;
+                let hitWall = false;
+
+                while (!hitWall && distance < 16) {
+                    distance += 0.05;
+                    let testX = Math.floor(player.x + Math.cos(rayAngle) * distance);
+                    let testY = Math.floor(player.y + Math.sin(rayAngle) * distance);
+                    if (testX < 0 || testX >= 10 || testY < 0 || testY >= 6) {
+                        hitWall = true;
+                        distance = 16;
+                    } else if (map[testY][testX] === 1) {
+                        hitWall = true;
+                    }
+                }
+
+                let correctedDist = distance * Math.cos(rayAngle - player.angle);
+                let wallHeight = Math.min(canvas.height, (canvas.height / correctedDist));
+                let y = (canvas.height - wallHeight) / 2;
+
+                ctx.fillStyle = `rgb(${Math.max(20, 150 - correctedDist * 10)}, ${Math.max(20, 170 - correctedDist * 10)}, 220)`;
+                ctx.fillRect(i, y, 1, wallHeight);
+            }
+
+            // 3D 공간 속 요원들 렌더링
+            for (let agent of agents) {
+                if (agent.hp <= 0) continue;
+                let ex = agent.x - player.x;
+                let ey = agent.y - player.y;
+                let spriteAngle = Math.atan2(ey, ex) - player.angle;
+                
+                while (spriteAngle < -Math.PI) spriteAngle += Math.PI * 2;
+                while (spriteAngle > Math.PI) spriteAngle -= Math.PI * 2;
+
+                if (Math.abs(spriteAngle) < Math.PI / 3) {
+                    let dist = Math.hypot(ex, ey);
+                    let screenX = (canvas.width / 2) + Math.tan(spriteAngle) * (canvas.width / 2);
+                    let size = Math.min(300, canvas.height / dist);
+
+                    ctx.fillStyle = agent.team === 'ally' ? '#00ffcc' : '#ff4655';
+                    ctx.beginPath();
+                    ctx.arc(screenX, canvas.height / 2, size / 4, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // 요원 이름 텍스트
+                    ctx.fillStyle = "white";
+                    ctx.font = "10px Arial";
+                    ctx.textAlign = "center";
+                    ctx.fillText(agent.name, screenX, canvas.height / 2 - size / 4 - 5);
+                }
+            }
+
+            // 발로란트 무기 UI (화면 하단 중앙 크로스헤어 및 총기 그래픽)
+            ctx.strokeStyle = "#00ffcc";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2 - 6, canvas.height / 2); ctx.lineTo(canvas.width / 2 - 2, canvas.height / 2);
+            ctx.moveTo(canvas.width / 2 + 2, canvas.height / 2); ctx.lineTo(canvas.width / 2 + 6, canvas.height / 2);
+            ctx.moveTo(canvas.width / 2, canvas.height / 2 - 6); ctx.lineTo(canvas.width / 2, canvas.height / 2 - 2);
+            ctx.moveTo(canvas.width / 2, canvas.height / 2 + 2); ctx.lineTo(canvas.width / 2, canvas.height / 2 + 6);
+            ctx.stroke();
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
